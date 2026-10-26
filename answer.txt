@@ -1,0 +1,70 @@
+Тестовое задание по базам данных. Схему для проверки взял такую: categories(id, name), products(id, name, category_id, price), customers(id, full_name, email), orders(id, customer_id, order_date), order_items(order_id, product_id, quantity, price). Запросы писал под PostgreSQL.
+
+Первый. Клиенты с заказами в текущем месяце, по убыванию суммы.
+
+SELECT c.id, c.full_name, SUM(oi.quantity * oi.price) AS total
+FROM customers c
+JOIN orders o ON o.customer_id = c.id
+JOIN order_items oi ON oi.order_id = o.id
+WHERE date_trunc('month', o.order_date) = date_trunc('month', CURRENT_DATE)
+GROUP BY c.id, c.full_name
+ORDER BY total DESC;
+
+На тестовых данных вышло два человека, Анна Иванова на 86 000 и Борис Петров на 21 400.
+
+Второй. Продукты дороже средней цены своей категории.
+
+WITH avg_price AS (
+    SELECT category_id, AVG(price) AS avg_price
+    FROM products
+    GROUP BY category_id
+)
+SELECT p.id, p.name, p.price, cat.name AS category, ROUND(a.avg_price, 2) AS category_avg
+FROM products p
+JOIN avg_price a ON a.category_id = p.category_id
+JOIN categories cat ON cat.id = p.category_id
+WHERE p.price > a.avg_price
+ORDER BY p.price ASC;
+
+Получилось пять позиций. Powerbank 2 500 при средней по категории 1 633, Пылесос 18 000 и Кофемашина 32 000 при средней 17 667, Смартфон 45 000 и Ноутбук 75 000 при средней 39 500.
+
+Третий. Заказы, где есть товары из Электроники.
+
+SELECT DISTINCT o.id, o.order_date, c.full_name
+FROM orders o
+JOIN customers c ON c.id = o.customer_id
+JOIN order_items oi ON oi.order_id = o.id
+JOIN products p ON p.id = oi.product_id
+JOIN categories cat ON cat.id = p.category_id
+WHERE cat.name = 'Электроника'
+ORDER BY o.order_date ASC;
+
+Вышло два заказа, номер 4 от 2025-11-20 и номер 1 от 2026-10-03.
+
+Четвёртый. Клиенты без заказов в прошлом году.
+
+SELECT c.id, c.full_name
+FROM customers c
+WHERE NOT EXISTS (
+    SELECT 1 FROM orders o
+    WHERE o.customer_id = c.id
+      AND date_trunc('year', o.order_date) = date_trunc('year', CURRENT_DATE - INTERVAL '1 year')
+)
+ORDER BY c.full_name ASC;
+
+Тут попали Анна Иванова, Борис Петров и Дмитрий Орлов. Отдельно отмечу: в выборку попадают и те, у кого заказов нет вообще, это нормально, но если нужны именно потерянные клиенты, надо добавить условие EXISTS по любым заказам.
+
+Пятый. Товары, которые ни разу не заказывали.
+
+SELECT p.id, p.name
+FROM products p
+WHERE NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.product_id = p.id)
+ORDER BY p.name ASC;
+
+Ответ Планшет и Чайник.
+
+Теперь отчёт. Проверял на базе из трёх категорий, десяти товаров, пяти клиентов и шести заказов с девятью позициями. Каждый результат сверял руками, суммы по клиентам, средние по категориям, пересечение с электроникой, отсутствие заказов за прошлый год и товары без продаж.
+
+Что нашёл по ходу. Без DISTINCT третий запрос дублирует заказ столько раз, сколько в нём электронных товаров. В первом запросе без GROUP BY по клиенту сумма выводится несколько раз и считается неверно. Про год: EXTRACT возвращает numeric, и если сравнивать его с датой или интервалом, а не с числом, PostgreSQL ругается на типы. Надёжнее date_trunc, он возвращает timestamp. NULL в order_date или price ломает суммы. И индексов на customer_id, order_id, product_id и order_date нет, поэтому будут последовательные сканирования.
+
+Рекомендации. Добавить индексы на orders(customer_id), orders(order_date), order_items(order_id), order_items(product_id), products(category_id). Поставить ограничения: NOT NULL для order_date и price, CHECK на положительные price и quantity, внешние ключи с ON DELETE RESTRICT. Хранить цену на момент заказа, это уже сделано, и добавить в orders статус и дату оплаты, чтобы отличать оформленные заказы от брошенных корзин. Для отчётов по месяцам либо индекс по выражению date_trunc, либо материализованное представление. И уникальные ограничения на customers(email) и products(name, category_id), чтобы не плодились дубликаты.
