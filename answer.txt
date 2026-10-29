@@ -1,70 +1,80 @@
-Тестовое задание по базам данных. Схему для проверки взял такую: categories(id, name), products(id, name, category_id, price), customers(id, full_name, email), orders(id, customer_id, order_date), order_items(order_id, product_id, quantity, price). Запросы писал под PostgreSQL.
+Тестовое задание по базам данных. Схему для проверки собрал сам. В ней пять таблиц: categories с полями id и name, products с id, name, category_id и price, customers с id, full_name и email, orders с id, customer_id и order_date, order_items с order_id, product_id, quantity и price. Запросы писал под PostgreSQL и проверял на реальной базе, а не на бумаге.
 
-Первый. Клиенты с заказами в текущем месяце, по убыванию суммы.
+Для проверки залил три категории, одиннадцать товаров, пять клиентов и шесть заказов. Скрипты схемы, данных и запросов лежат в репозитории https://github.com/mylebedevsergey-spec/sql-testing
+
+Первый запрос. Клиенты с заказами в текущем месяце, по убыванию суммы.
 
 SELECT c.id, c.full_name, SUM(oi.quantity * oi.price) AS total
-FROM customers c
-JOIN orders o ON o.customer_id = c.id
-JOIN order_items oi ON oi.order_id = o.id
-WHERE date_trunc('month', o.order_date) = date_trunc('month', CURRENT_DATE)
-GROUP BY c.id, c.full_name
-ORDER BY total DESC;
+  FROM customers c
+  JOIN orders o ON o.customer_id = c.id
+  JOIN order_items oi ON oi.order_id = o.id
+ WHERE date_trunc('month', o.order_date) = date_trunc('month', CURRENT_DATE)
+ GROUP BY c.id, c.full_name
+ ORDER BY total DESC;
 
-На тестовых данных вышло два человека, Анна Иванова на 86 000 и Борис Петров на 21 400.
+На моих данных вышло три человека. Анна Иванова 86 500, Галина Кузнецова 33 000, Борис Петров 4 700.
 
-Второй. Продукты дороже средней цены своей категории.
+Второй. Товары дороже средней цены своей категории, по возрастанию цены.
 
 WITH avg_price AS (
     SELECT category_id, AVG(price) AS avg_price
-    FROM products
-    GROUP BY category_id
+      FROM products
+     GROUP BY category_id
 )
 SELECT p.id, p.name, p.price, cat.name AS category, ROUND(a.avg_price, 2) AS category_avg
-FROM products p
-JOIN avg_price a ON a.category_id = p.category_id
-JOIN categories cat ON cat.id = p.category_id
-WHERE p.price > a.avg_price
-ORDER BY p.price ASC;
+  FROM products p
+  JOIN avg_price a ON a.category_id = p.category_id
+  JOIN categories cat ON cat.id = p.category_id
+ WHERE p.price > a.avg_price
+ ORDER BY p.price ASC;
 
-Получилось пять позиций. Powerbank 2 500 при средней по категории 1 633, Пылесос 18 000 и Кофемашина 32 000 при средней 17 667, Смартфон 45 000 и Ноутбук 75 000 при средней 39 500.
+Вышло пять позиций. Powerbank 2 500 при средней по категории 1 300, Пылесос 18 000 и Кофемашина 32 000 при средней 17 500, Смартфон 45 000 и Ноутбук 75 000 при средней 37 875.
 
-Третий. Заказы, где есть товары из Электроники.
+Третий. Заказы, где есть товары из «Электроники», по дате.
 
 SELECT DISTINCT o.id, o.order_date, c.full_name
-FROM orders o
-JOIN customers c ON c.id = o.customer_id
-JOIN order_items oi ON oi.order_id = o.id
-JOIN products p ON p.id = oi.product_id
-JOIN categories cat ON cat.id = p.category_id
-WHERE cat.name = 'Электроника'
-ORDER BY o.order_date ASC;
+  FROM orders o
+  JOIN customers c ON c.id = o.customer_id
+  JOIN order_items oi ON oi.order_id = o.id
+  JOIN products p ON p.id = oi.product_id
+  JOIN categories cat ON cat.id = p.category_id
+ WHERE cat.name = 'Электроника'
+ ORDER BY o.order_date ASC;
 
-Вышло два заказа, номер 4 от 2025-11-20 и номер 1 от 2026-10-03.
+Получилось пять заказов. Заказ 4 от 20 ноября 2025 у Виктора Сидорова, заказ 6 от 30 сентября 2026 у Дмитрия Орлова, заказы 1 от 3 октября и 3 от 20 октября у Анны Ивановой, заказ 5 от 25 октября у Галины Кузнецовой.
 
-Четвёртый. Клиенты без заказов в прошлом году.
+Четвёртый. Клиенты без заказов в прошлом году, по алфавиту.
 
 SELECT c.id, c.full_name
-FROM customers c
-WHERE NOT EXISTS (
-    SELECT 1 FROM orders o
-    WHERE o.customer_id = c.id
-      AND date_trunc('year', o.order_date) = date_trunc('year', CURRENT_DATE - INTERVAL '1 year')
-)
-ORDER BY c.full_name ASC;
+  FROM customers c
+ WHERE NOT EXISTS (
+       SELECT 1 FROM orders o
+        WHERE o.customer_id = c.id
+          AND date_trunc('year', o.order_date) = date_trunc('year', CURRENT_DATE - INTERVAL '1 year')
+ )
+ ORDER BY c.full_name ASC;
 
-Тут попали Анна Иванова, Борис Петров и Дмитрий Орлов. Отдельно отмечу: в выборку попадают и те, у кого заказов нет вообще, это нормально, но если нужны именно потерянные клиенты, надо добавить условие EXISTS по любым заказам.
+В выборку попали Анна Иванова, Борис Петров, Галина Кузнецова и Дмитрий Орлов. Стоит оговориться, что запрос возвращает и тех, у кого заказов нет вообще, потому что для них условие «нет заказов в прошлом году» тоже верно. Если нужны именно потерянные клиенты, у которых заказы были раньше, надо добавить проверку на существование любого заказа.
 
-Пятый. Товары, которые ни разу не заказывали.
+Пятый. Товары, которые ни разу не заказывали, по названию.
 
 SELECT p.id, p.name
-FROM products p
-WHERE NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.product_id = p.id)
-ORDER BY p.name ASC;
+  FROM products p
+ WHERE NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.product_id = p.id)
+ ORDER BY p.name ASC;
 
-Ответ Планшет и Чайник.
+Остался один товар, Робот-пылесос.
 
-Теперь отчёт. Проверял на базе из трёх категорий, десяти товаров, пяти клиентов и шести заказов с девятью позициями. Каждый результат сверял руками, суммы по клиентам, средние по категориям, пересечение с электроникой, отсутствие заказов за прошлый год и товары без продаж.
+Теперь отчёт. Что нашёл при проверке.
 
-Что нашёл по ходу. Без DISTINCT третий запрос дублирует заказ столько раз, сколько в нём электронных товаров. В первом запросе без GROUP BY по клиенту сумма выводится несколько раз и считается неверно. Про год: EXTRACT возвращает numeric, и если сравнивать его с датой или интервалом, а не с числом, PostgreSQL ругается на типы. Надёжнее date_trunc, он возвращает timestamp. NULL в order_date или price ломает суммы. И индексов на customer_id, order_id, product_id и order_date нет, поэтому будут последовательные сканирования.
+Без DISTINCT третий запрос дублирует заказ столько раз, сколько в нём электронных позиций. У Анны в заказе 1 один такой товар, а если бы было два, строка появилась бы дважды.
 
-Рекомендации. Добавить индексы на orders(customer_id), orders(order_date), order_items(order_id), order_items(product_id), products(category_id). Поставить ограничения: NOT NULL для order_date и price, CHECK на положительные price и quantity, внешние ключи с ON DELETE RESTRICT. Хранить цену на момент заказа, это уже сделано, и добавить в orders статус и дату оплаты, чтобы отличать оформленные заказы от брошенных корзин. Для отчётов по месяцам либо индекс по выражению date_trunc, либо материализованное представление. И уникальные ограничения на customers(email) и products(name, category_id), чтобы не плодились дубликаты.
+Если в первом запросе убрать GROUP BY по клиенту, сумма выведется несколько раз и посчитается неверно, потому что строки чеков не сгруппированы.
+
+Про год отдельная история. EXTRACT возвращает число, и если сравнивать его с датой или интервалом, а не с числом, PostgreSQL ругается на типы. Надёжнее date_trunc, он возвращает timestamp и сравнение проходит предсказуемо.
+
+NULL в дате заказа или в цене ломает суммы молча. SUM игнорирует пустые значения, а дата в фильтре отсекает строку целиком. На моих данных пустых значений нет, но в исходной схеме ограничений NOT NULL на этих полях тоже нет.
+
+Индексов на внешние ключи и на дату заказа в схеме не было, поэтому каждый запрос делал последовательное сканирование. На шести заказах это незаметно, на реальных объёмах станет узким местом.
+
+Рекомендации. Добавить индексы на orders(customer_id), orders(order_date), order_items(order_id), order_items(product_id) и products(category_id). Поставить NOT NULL на order_date и price, CHECK на положительные цену и количество, внешние ключи с ON DELETE RESTRICT. Цену на момент заказа хранить в позиции, как сделано у меня, а не брать из товара. В заказы добавить статус и дату оплаты, чтобы отличать оформленные от брошенных корзин. Для отчётов по месяцам либо индекс по выражению date_trunc, либо материализованное представление. И уникальные ограничения на customers(email) и products(name, category_id), чтобы не плодились дубликаты.
